@@ -29,11 +29,12 @@ jobs:
         with:
           python-version: '3.10'
 
-      # ==============================================
-      # ✅ 关键：只装虚拟桌面，不装整个 GNOME 桌面！
-      # ==============================================
-      - name: 安装虚拟显示
-        run: sudo apt-get install -y xvfb
+      # 安装 Chrome（setup-chrome，与 Run#4 验证过的配置一致）
+      - name: 安装 Chrome
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: latest
+          install-chromedriver: true
 
       # 安装依赖
       - name: 安装 Python 包
@@ -63,10 +64,7 @@ jobs:
             echo "rooms=${{ secrets.HUYA_ROOMS }}" >> $GITHUB_OUTPUT
           fi
 
-
-      # ==============================================
-      # ✅ 启动虚拟桌面 + 运行脚本（GitHub 自带 Chrome，不用装！）
-      # ==============================================
+      # 运行脚本（CHROME_BIN/CHROMEWEBDRIVER 由 setup-chrome 提供）
       - name: 运行虎粮发放
         env:
           HUYA_COOKIE: ${{ secrets.HUYA_COOKIE }}
@@ -74,4 +72,4 @@ jobs:
           SEND_KEY: ${{ secrets.SEND_KEY }}
           HEADLESS: "true"
         run: |
-          xvfb-run -a python main.py
+          python main.py
