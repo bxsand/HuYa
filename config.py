@@ -32,8 +32,9 @@ URLS = {
 }
 
 # 延时
+# 延时建议调整
 TIMING = {
-    "implicit_wait": 2,
-    "page_load_wait": 5,    # 从 2 改成 4
-    "room_enter_wait": 5,   # 从 2 改成 4
+    "implicit_wait": 3,
+    "page_load_wait": 6,     # 登录刷新后留足加载时间
+    "room_enter_wait": 8,    # 直播间页面极大，给它 8 秒去加载基础 DOM
 }
