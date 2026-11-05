@@ -41,8 +41,10 @@ jobs:
 
       # 检查 Cookie
       - name: 检查 HUYA_COOKIE
+        env:
+          HUYA_COOKIE: ${{ secrets.HUYA_COOKIE }}
         run: |
-          if [ -z "${{ secrets.HUYA_COOKIE }}" ]; then
+          if [ -z "$HUYA_COOKIE" ]; then
             echo "❌ 未配置 HUYA_COOKIE"
             exit 1
           fi
