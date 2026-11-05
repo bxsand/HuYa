@@ -1,8 +1,9 @@
 name: 虎牙虎粮自动发放
 
 on:
-  schedule:
-    - cron: '30 16 * * *'  # 北京时间 00:30
+  # ⏸️ 定时任务已停用（2026-11-06）：等抓包重构 + 通知配置完成后再恢复
+  # schedule:
+  #   - cron: '30 16 * * *'  # 北京时间 00:30
   workflow_dispatch:
     inputs:
       rooms:
