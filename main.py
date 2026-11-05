@@ -136,29 +136,27 @@ class HuYaAuto:
     def get_hl_count(self):
         print("[SEARCH] 查询虎粮数量")
         self.driver.get(cfg.URLS["pay_index"])
-
-        # 强制等待页面完全加载（GitHub Action 必须加长）
         time.sleep(3)
 
         try:
-            # 等待【背包】标签可点击后用 JS 点击（headless 下比 Selenium click 更可靠）
             WebDriverWait(self.driver, 15).until(
                 EC.element_to_be_clickable((By.ID, cfg.PAY_PAGE["pack_tab"]))
             )
             self.driver.execute_script("document.getElementById('packTab').click()")
-            time.sleep(2)  # 点击后必须等面板渲染 + AJAX 拉取虎粮
-
+            time.sleep(2)
         except Exception:
             print("[WARN] 点击背包标签失败")
             return 0
 
-        # 强化版 JS 获取虎粮（Python 侧轮询，避免 async/await 语法问题）
+        # 强化版：li 的 title 或内部 img 的 title 任一含"虎粮"即匹配（兼容 headless）
         get_hl_js = '''
             (function() {
                 const items = document.querySelectorAll('li[data-num]');
                 for (let item of items) {
-                    let title = item.title || item.innerText || '';
-                    if (title.includes('虎粮')) {
+                    const liTitle = item.getAttribute('title') || '';
+                    const img = item.querySelector('img[title]');
+                    const imgTitle = img ? img.getAttribute('title') : '';
+                    if (liTitle.indexOf('虎粮') >= 0 || imgTitle.indexOf('虎粮') >= 0) {
                         return item.getAttribute('data-num');
                     }
                 }
@@ -166,20 +164,19 @@ class HuYaAuto:
             })()
         '''
         n = 0
-        for _ in range(40):
+        for _ in range(60):
             n = self.driver.execute_script(get_hl_js)
             if n and str(n).isdigit() and int(n) > 0:
                 break
-            time.sleep(0.3)
+            time.sleep(0.5)
 
         hl = int(n) if n and str(n).isdigit() else 0
         if hl <= 0:
-            # 诊断：打印页面文本，便于定位 headless 下未匹配原因
             try:
-                txt = self.driver.execute_script("return document.body.innerText.slice(0,800)")
-                print("[DIAG] 页面文本:", txt)
+                diag = self.driver.execute_script("(function(){const items=document.querySelectorAll('li[data-num]');const arr=[];for(let it of items){const img=it.querySelector('img[title]');arr.push({num:it.getAttribute('data-num'),liTitle:it.getAttribute('title'),imgTitle:img?img.getAttribute('title'):null,dataType:it.getAttribute('data-type')});}return JSON.stringify({count:items.length,items:arr,body:document.body.innerText.slice(0,400)});})()")
+                print("[DIAG]", diag)
             except Exception as e:
-                print("[DIAG] 获取页面文本失败:", e)
+                print("[DIAG] 获取失败:", e)
         print(f"[COUNT] 虎粮数量: {hl}")
         return hl
 
