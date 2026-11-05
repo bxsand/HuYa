@@ -65,21 +65,30 @@ class HuYaAuto:
         chrome_options = Options()
 
         if not self.debug:
-            chrome_options.add_argument('--headless=new')
+            chrome_options.add_argument('--headless')
 
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
+        chrome_options.add_argument('--disable-gpu')
 
         chrome_options.add_argument('--disable-images')
-        chrome_options.add_argument('--disable-javascript=false')
 
         chrome_options.add_argument('--disable-blink-features=AutomationControlled')
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
         chrome_options.add_argument('--window-size=1920,1080')
 
+        chrome_bin = os.environ.get('CHROME_BIN')
+        if chrome_bin and os.path.exists(chrome_bin):
+            chrome_options.binary_location = chrome_bin
+
+        chromedriver = os.environ.get('CHROMEWEBDRIVER')
         print("[START] 启动浏览器")
-        driver = webdriver.Chrome(options=chrome_options)
+        if chromedriver and os.path.exists(chromedriver):
+            from selenium.webdriver.chrome.service import Service
+            driver = webdriver.Chrome(service=Service(chromedriver), options=chrome_options)
+        else:
+            driver = webdriver.Chrome(options=chrome_options)
         driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         return driver
 
