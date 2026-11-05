@@ -141,12 +141,12 @@ class HuYaAuto:
         time.sleep(3)
 
         try:
-            # 等待并点击【背包】标签（最关键：必须等可点击）
-            pack_tab = WebDriverWait(self.driver, 15).until(
+            # 等待【背包】标签可点击后用 JS 点击（headless 下比 Selenium click 更可靠）
+            WebDriverWait(self.driver, 15).until(
                 EC.element_to_be_clickable((By.ID, cfg.PAY_PAGE["pack_tab"]))
             )
-            pack_tab.click()
-            time.sleep(1.5)  # 点击后必须等面板渲染
+            self.driver.execute_script("document.getElementById('packTab').click()")
+            time.sleep(2)  # 点击后必须等面板渲染 + AJAX 拉取虎粮
 
         except Exception:
             print("[WARN] 点击背包标签失败")
@@ -166,13 +166,20 @@ class HuYaAuto:
             })()
         '''
         n = 0
-        for _ in range(20):
+        for _ in range(40):
             n = self.driver.execute_script(get_hl_js)
             if n and str(n).isdigit() and int(n) > 0:
                 break
-            time.sleep(0.2)
+            time.sleep(0.3)
 
         hl = int(n) if n and str(n).isdigit() else 0
+        if hl <= 0:
+            # 诊断：打印页面文本，便于定位 headless 下未匹配原因
+            try:
+                txt = self.driver.execute_script("return document.body.innerText.slice(0,800)")
+                print("[DIAG] 页面文本:", txt)
+            except Exception as e:
+                print("[DIAG] 获取页面文本失败:", e)
         print(f"[COUNT] 虎粮数量: {hl}")
         return hl
 
