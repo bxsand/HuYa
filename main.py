@@ -315,14 +315,19 @@ class HuYaAuto:
             self.msg_logs.append(f"今日虎粮总数: {total}")
 
             if total <= 0:
-                print("[DONE] 暂无虎粮，结束运行")
-                return
+                print("[DONE] 暂无虎粮，仅执行每日打卡")
 
             for i, rid in enumerate(self.rooms):
-                num = (total // len(self.rooms) + (1 if i < (total % len(self.rooms)) else 0))
+                num = 0
+                if total > 0:
+                    num = (total // len(self.rooms) + (1 if i < (total % len(self.rooms)) else 0))
                 print(f"\n>>> 房间: {rid} (目标数量: {num})")
 
-                g_res = self.send_to_room_in_situ(rid, num)
+                if num > 0:
+                    g_res = self.send_to_room_in_situ(rid, num)
+                else:
+                    g_res = "⏭️ 无虎粮，跳过送礼"
+
                 c_res = self.daily_check_in(rid)
 
                 msg = f"{g_res}； {c_res}"
