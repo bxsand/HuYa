@@ -44,16 +44,26 @@ class HuYaAuto:
 
     def _init_browser(self):
         chrome_options = Options()
+        # 使用 setup-chrome 提供的 Chrome（CHROME_BIN）
+        chrome_bin = os.getenv('CHROME_BIN', '')
+        if chrome_bin:
+            chrome_options.binary_location = chrome_bin
+
         if not self.debug:
-            chrome_options.add_argument('--headless=new')
+            chrome_options.add_argument('--headless')
 
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
+        chrome_options.add_argument('--disable-gpu')
         chrome_options.add_argument('--window-size=1920,1080')
         chrome_options.add_argument('--disable-blink-features=AutomationControlled')
         chrome_options.page_load_strategy = 'eager'
 
-        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+        chromedriver_path = os.getenv('CHROMEWEBDRIVER', '')
+        if chromedriver_path:
+            driver = webdriver.Chrome(service=Service(chromedriver_path), options=chrome_options)
+        else:
+            driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
         driver.set_page_load_timeout(60)
         return driver
 
@@ -108,22 +118,67 @@ class HuYaAuto:
         print("[SEARCH] 正在查询虎粮数量...")
         self._safe_get(cfg.URLS["pay_index"], sleep=4)
         try:
-            pack_tab = self.wait.until(EC.element_to_be_clickable((By.ID, cfg.PAY_PAGE["pack_tab"])))
-            pack_tab.click()
+            # JS 点击 packTab（比 Selenium 点击更稳，不要求元素 fully clickable）
+            clicked = False
+            for _ in range(30):
+                clicked = self.driver.execute_script(
+                    "try{var e=document.getElementById('packTab');if(e){e.click();return true;}return false;}catch(err){return false;}"
+                )
+                if clicked:
+                    break
+                time.sleep(1)
             time.sleep(2)
-            n = self.driver.execute_script('''
-                const items = document.querySelectorAll('li[data-num]');
-                for (let item of items) {
-                    let title = item.title || item.innerText || '';
-                    if (title.includes('虎粮')) return item.getAttribute('data-num');
-                }
-                return 0;
-            ''')
-            count = int(n) if n else 0
+
+            # 轮询读取虎粮数量（liTitle 或 imgTitle 任一含'虎粮'）
+            count = 0
+            for _ in range(60):
+                n = self.driver.execute_script('''
+                    var items = document.querySelectorAll('li[data-num]');
+                    for (var i = 0; i < items.length; i++) {
+                        var it = items[i];
+                        var liT = it.getAttribute('title') || '';
+                        var img = it.querySelector('img');
+                        var imgT = img ? (img.getAttribute('title') || '') : '';
+                        if (liT.indexOf('虎粮') >= 0 || imgT.indexOf('虎粮') >= 0) {
+                            return it.getAttribute('data-num');
+                        }
+                    }
+                    return 0;
+                ''')
+                try:
+                    v = int(n)
+                    if v > 0:
+                        count = v
+                        break
+                except Exception:
+                    pass
+                time.sleep(0.5)
+
+            if count <= 0:
+                # 诊断输出：打印 li[data-num] 的实际 title 值
+                try:
+                    diag = self.driver.execute_script('''
+                        var items = document.querySelectorAll('li[data-num]');
+                        var arr = [];
+                        for (var i = 0; i < items.length; i++) {
+                            var it = items[i];
+                            var img = it.querySelector('img');
+                            arr.push({
+                                num: it.getAttribute('data-num'),
+                                liTitle: it.getAttribute('title') || '',
+                                imgTitle: img ? (img.getAttribute('title') || '') : ''
+                            });
+                        }
+                        return JSON.stringify({count: items.length, items: arr, body: document.body ? document.body.innerText.slice(0, 600) : ''});
+                    ''')
+                    print(f"[DIAG] {diag}")
+                except Exception as e:
+                    print(f"[DIAG] 诊断失败: {e}")
+
             print(f"[COUNT] 识别到虎粮: {count}")
             return count
-        except:
-            print("[ERROR] 虎粮数量识别失败")
+        except Exception as e:
+            print(f"[ERROR] 虎粮数量识别失败: {e}")
             return 0
 
     def send_to_room_in_situ(self, rid, count):
@@ -169,7 +224,7 @@ class HuYaAuto:
     def daily_check_in(self, rid):
         try:
             self._safe_get(cfg.URLS["room_base"].format(rid), sleep=6)
-            badge = self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "FanClubHd--UAIAw8vo8FGSKqVwLp7A")))
+            badge = self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "FanClubHd--UAIAwvo8FGSKqVwLp7A")))
             ActionChains(self.driver).move_to_element(badge).perform()
             time.sleep(3)
             btn = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//a[contains(text(), '打卡')]")))
