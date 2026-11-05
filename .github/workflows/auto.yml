@@ -29,11 +29,14 @@ jobs:
         with:
           python-version: '3.10'
 
-      # ==============================================
-      # ✅ 关键：只装虚拟桌面，不装整个 GNOME 桌面！
-      # ==============================================
-      - name: 安装虚拟显示
-        run: sudo apt-get install -y xvfb
+      # 安装固定版 Chrome + 匹配的 chromedriver（修复 ubuntu-26.04 上 Chrome 启动崩溃）
+      - name: 安装固定版 Chrome
+        id: setup-chrome
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: 'latest'
+          install-dependencies: true
+          install-chromedriver: true
 
       # 安装依赖
       - name: 安装 Python 包
@@ -71,5 +74,7 @@ jobs:
           HUYA_COOKIE: ${{ secrets.HUYA_COOKIE }}
           HUYA_ROOMS: ${{ steps.get-rooms.outputs.rooms }}
           HEADLESS: "true"
+          CHROME_BIN: ${{ steps.setup-chrome.outputs.chrome-path }}
+          CHROMEWEBDRIVER: ${{ steps.setup-chrome.outputs.chromedriver-path }}
         run: |
-          xvfb-run -a python main.py
+          python main.py
