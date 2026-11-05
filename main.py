@@ -71,6 +71,9 @@ class HuYaAuto:
         chrome_options.add_argument('--disable-dev-shm-usage')
         chrome_options.add_argument('--disable-gpu')
 
+        # 页面加载策略：eager（DOMContentLoaded 即返回，避免 hd.huya.com 挂起）
+        chrome_options.page_load_strategy = 'eager'
+
         chrome_options.add_argument('--disable-images')
 
         chrome_options.add_argument('--disable-blink-features=AutomationControlled')
@@ -89,6 +92,7 @@ class HuYaAuto:
             driver = webdriver.Chrome(service=Service(chromedriver), options=chrome_options)
         else:
             driver = webdriver.Chrome(options=chrome_options)
+        driver.set_page_load_timeout(60)
         driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         return driver
 
@@ -148,11 +152,9 @@ class HuYaAuto:
             print("[WARN] 点击背包标签失败")
             return 0
 
-        # 强化版 JS 获取虎粮（容错更强，支持异步加载）
-        n = self.driver.execute_script('''
-            let n = 0;
-            let maxWait = 20;
-            function findHuliang() {
+        # 强化版 JS 获取虎粮（Python 侧轮询，避免 async/await 语法问题）
+        get_hl_js = '''
+            (function() {
                 const items = document.querySelectorAll('li[data-num]');
                 for (let item of items) {
                     let title = item.title || item.innerText || '';
@@ -160,16 +162,15 @@ class HuYaAuto:
                         return item.getAttribute('data-num');
                     }
                 }
-                return null;
-            }
-            // 轮询查找（解决异步加载）
-            while(maxWait-- > 0) {
-                let res = findHuliang();
-                if(res) return res;
-                await new Promise(r => setTimeout(r, 200));
-            }
-            return 0;
-        ''')
+                return 0;
+            })()
+        '''
+        n = 0
+        for _ in range(20):
+            n = self.driver.execute_script(get_hl_js)
+            if n and str(n).isdigit() and int(n) > 0:
+                break
+            time.sleep(0.2)
 
         hl = int(n) if n and str(n).isdigit() else 0
         print(f"[COUNT] 虎粮数量: {hl}")
