@@ -238,16 +238,73 @@ class HuYaAuto:
             return "❌ 过程异常"
 
     def daily_check_in(self, rid):
+        # 粉丝牌(发弹幕栏左侧, id=chatHostPic)悬停 -> 悬浮框内点“打卡”
         try:
             self._safe_get(cfg.URLS["room_base"].format(rid), sleep=6)
-            badge = self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "FanClubHd--UAIAwvo8FGSKqVwLp7A")))
-            ActionChains(self.driver).move_to_element(badge).perform()
-            time.sleep(3)
-            btn = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//a[contains(text(), '打卡')]")))
-            btn.click()
-            return "✅ 打卡成功"
-        except: return "ℹ️ 已打卡"
+            badge = None
+            for _by, _sel in ((By.ID, "chatHostPic"), (By.CLASS_NAME, "chat-host-pic")):
+                try:
+                    _el = self.driver.find_element(_by, _sel)
+                    if _el and _el.is_displayed():
+                        badge = _el
+                        break
+                except Exception:
+                    pass
+            if badge is None:
+                print("[CHECKIN] 未找到粉丝牌, 跳过")
+                return "⚠️ 未找到粉丝牌"
 
+            def _hover():
+                try:
+                    ActionChains(self.driver).move_to_element(badge).perform()
+                except Exception:
+                    pass
+                try:
+                    self.driver.execute_script(
+                        "var e=arguments[0];"
+                        "['mouseover','mouseenter','mousemove'].forEach(function(t){"
+                        "e.dispatchEvent(new MouseEvent(t,{bubbles:true,cancelable:true,view:window}));});",
+                        badge,
+                    )
+                except Exception:
+                    pass
+
+            def _find_btn():
+                try:
+                    el = self.driver.find_element(By.XPATH, "//a[contains(text(),'打卡')]")
+                    return el if el.is_displayed() else None
+                except Exception:
+                    return None
+
+            self.driver.implicitly_wait(0.5)
+            btn = None
+            try:
+                for _ in range(12):
+                    _hover()
+                    time.sleep(0.8)
+                    btn = _find_btn()
+                    if btn:
+                        break
+            finally:
+                try:
+                    self.driver.implicitly_wait(cfg.TIMING["implicit_wait"])
+                except Exception:
+                    self.driver.implicitly_wait(3)
+
+            if btn is None:
+                print("[CHECKIN] 未发现打卡按钮(可能今日已完成)")
+                return "ℹ️ 今日已打卡"
+
+            self.driver.execute_script("arguments[0].click()", btn)
+            time.sleep(2)
+            if _find_btn() is None:
+                print("[CHECKIN] 打卡成功(按钮已变为已完成)")
+                return "✅ 打卡成功"
+            print("[CHECKIN] 点击后按钮仍存在, 未确认成功")
+            return "⚠️ 打卡未生效"
+        except Exception as e:
+            print("[CHECKIN] 异常:", e)
+            return "⚠️ 打卡异常"
     def run(self):
         print("=" * 40 + f"\n[HUYA] 虎牙自动任务启动 (Debug: {self.debug})\n" + "=" * 40)
         try:
