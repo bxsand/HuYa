@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import glob
 import os
 import sys
 import time
@@ -14,7 +15,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
-from webdriver_manager.chrome import ChromeDriverManager
 
 import config as cfg
 
@@ -44,11 +44,6 @@ class HuYaAuto:
 
     def _init_browser(self):
         chrome_options = Options()
-        # 使用 setup-chrome 提供的 Chrome（CHROME_BIN）
-        chrome_bin = os.getenv('CHROME_BIN', '')
-        if chrome_bin:
-            chrome_options.binary_location = chrome_bin
-
         if not self.debug:
             chrome_options.add_argument('--headless')
 
@@ -59,11 +54,32 @@ class HuYaAuto:
         chrome_options.add_argument('--disable-blink-features=AutomationControlled')
         chrome_options.page_load_strategy = 'eager'
 
-        chromedriver_path = os.getenv('CHROMEWEBDRIVER', '')
-        if chromedriver_path:
-            driver = webdriver.Chrome(service=Service(chromedriver_path), options=chrome_options)
+        # 优先使用 setup-chrome 安装的版本（路径含版本号，用 glob 匹配）
+        chrome_bin = ''
+        _found = glob.glob('/opt/hostedtoolcache/setup-chrome/chromium/*/x64/chrome')
+        if _found:
+            chrome_bin = _found[0]
         else:
-            driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+            _env_bin = os.getenv('CHROME_BIN', '').strip()
+            if _env_bin and os.path.isfile(_env_bin):
+                chrome_bin = _env_bin
+        if chrome_bin:
+            chrome_options.binary_location = chrome_bin
+
+        driver_path = ''
+        _found = glob.glob('/opt/hostedtoolcache/setup-chrome/chromedriver/*/x64/chromedriver')
+        if _found:
+            driver_path = _found[0]
+        else:
+            _env_drv = os.getenv('CHROMEWEBDRIVER', '').strip()
+            if _env_drv and os.path.isfile(_env_drv):
+                driver_path = _env_drv
+
+        print(f"[CHROME] binary={chrome_bin} driver={driver_path}")
+        if driver_path:
+            driver = webdriver.Chrome(service=Service(driver_path), options=chrome_options)
+        else:
+            driver = webdriver.Chrome(options=chrome_options)
         driver.set_page_load_timeout(60)
         return driver
 
