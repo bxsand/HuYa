@@ -1,13 +1,13 @@
 name: 虎牙虎粮自动发放
 
 on:
-  # ⏸️ 定时任务已停用（2026-11-06）：等抓包重构 + 通知配置完成后再恢复
-  # schedule:
-  #   - cron: '30 16 * * *'  # 北京时间 00:30
+  # 每天北京时间 00:30 自动运行（Run#13 手动验证通过后恢复）
+  schedule:
+    - cron: '30 16 * * *'
   workflow_dispatch:
     inputs:
       rooms:
-        description: '房间号，逗号分隔'
+        description: '房间号，逗号分隔（留空则用 secrets.HUYA_ROOMS）'
         required: false
         default: ''
 
@@ -18,7 +18,6 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
-      # 缓存 Python 依赖（超级提速）
       - name: 缓存 Python 依赖
         uses: actions/cache@v4
         with:
@@ -30,17 +29,14 @@ jobs:
         with:
           python-version: '3.10'
 
-      # 不装 Chrome、不装 chromedriver：
-      # runner 自带 /usr/bin/google-chrome，交给 Selenium Manager 自动匹配驱动，
-      # 避免 setup-chrome 塞进 PATH 的 chromedriver 与自带 Chrome 版本不一致
-      # （Run#12 报错：This version of ChromeDriver only supports Chrome version 159）
+      # 不装 Chrome、不装 chromedriver：runner 自带 /usr/bin/google-chrome，
+      # 交给 Selenium Manager 自动匹配驱动（setup-chrome 会塞进不匹配的 chromedriver）
       - name: 查看 Chrome 版本
         run: google-chrome --version || chromium --version || true
 
       - name: 安装 Python 包
         run: pip install -r requirements.txt
 
-      # 检查 Cookie（用环境变量注入，避免特殊字符破坏 shell）
       - name: 检查 HUYA_COOKIE
         env:
           HUYA_COOKIE: ${{ secrets.HUYA_COOKIE }}
@@ -50,7 +46,6 @@ jobs:
             exit 1
           fi
 
-      # 获取房间号
       - name: 获取房间号
         id: get-rooms
         run: |
