@@ -1,9 +1,9 @@
 name: 虎牙虎粮自动发放
 
 on:
-  # 每天北京时间 00:30 自动运行（Run#13 手动验证通过后恢复）
-  schedule:
-    - cron: '30 16 * * *'
+  # 定时由华为云函数 huya-dispatcher 触发（每日北京时间 00:30）。
+  # 不用 GitHub 自带 schedule：公共/fork 仓库 60 天无活动会被自动禁用，
+  # 且实测延迟 2~4 小时不可控。workflow_dispatch 不受 60 天限制。
   workflow_dispatch:
     inputs:
       rooms:
@@ -11,7 +11,7 @@ on:
         required: false
         default: ''
 
-# 防撞车：云函数 dispatch 与残留 schedule 同时触发时排队而非并行
+# 防撞车：云函数 dispatch 与手动触发可能几乎同时发生，排队而非并行
 # （送礼是消耗性操作，两个 run 并行会把同一批虎粮重复送出）
 concurrency:
   group: send-hl
