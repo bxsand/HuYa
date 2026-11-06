@@ -246,8 +246,63 @@ class HuYaTask:
         print(f"[COUNT] 虎粮: {hl}")
         return hl
 
+    def _read_hl_on_gift_page(self):
+        """从礼物页读虎粮余额：.m-gift-item 里的 .c-count；-1 表示页面没有虎粮条目"""
+        try:
+            v = self.driver.execute_script(
+                "var items = document.querySelectorAll('.m-gift-item');"
+                "for (var i = 0; i < items.length; i++) {"
+                "  var t = items[i].innerText || '';"
+                "  if (t.indexOf('虎粮') >= 0) {"
+                "    var c = items[i].querySelector('.c-count');"
+                "    var s = (c ? c.innerText : '').replace(/[^0-9]/g, '');"
+                "    return s ? parseInt(s, 10) : 0;"
+                "  }"
+                "}"
+                "return -1;"
+            )
+            return int(v) if v is not None else None
+        except Exception:
+            return None
+
+    def _wait_balance(self, timeout=15):
+        end = time.time() + timeout
+        while time.time() < end:
+            v = self._read_hl_on_gift_page()
+            if v is not None and v >= 0:
+                return v
+            time.sleep(0.8)
+        return None
+
+    def _find_by_text(self, text):
+        """按可见文本找元素（用于"赠送""立即送出"这类无稳定 class 的按钮）"""
+        try:
+            els = self.driver.find_elements(By.XPATH, "//*[normalize-space(text())='%s']" % text)
+        except Exception:
+            return None
+        for e in reversed(els):
+            try:
+                if e.is_displayed():
+                    return e
+            except Exception:
+                continue
+        return None
+
+    def _click_el(self, el):
+        """优先真实鼠标点击（触发 hover 态），失败再退到 JS click"""
+        try:
+            self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
+            ActionChains(self.driver).move_to_element(el).pause(0.3).click().perform()
+            return True
+        except Exception:
+            try:
+                self.driver.execute_script("arguments[0].click();", el)
+                return True
+            except Exception:
+                return False
+
     def send_gift(self, rid, count):
-        """赠送虎粮，返回文字结果（失败不致命，房间里可能没开播）"""
+        """赠送虎粮。真实验证：送礼前后背包余额差 == 送出数才算成功"""
         if count <= 0:
             return "无粮可送"
         try:
@@ -258,41 +313,63 @@ class HuYaTask:
                 return "⚠️ 未取到房间参数（可能未开播）"
 
             self._goto(cfg.URLS["gift_tab"].format(lp=lp, gid=gid), settle=cfg.TIMING["page_load_wait"])
-            items = self.wait.until(
-                EC.presence_of_all_elements_located((By.CLASS_NAME, cfg.GIFT["item_class"]))
-            )
+            before = self._wait_balance()
+            if before is None:
+                return "❌ 读不到虎粮余额"
+            if before <= 0:
+                return "无粮可送"
+            n = min(count, before)
+
             target = None
-            for it in items:
+            for it in self.driver.find_elements(By.CLASS_NAME, cfg.GIFT["item_class"]):
                 if "虎粮" in (it.text or ""):
                     target = it
                     break
             if target is None:
                 return "❌ 礼物面板无虎粮"
 
-            ActionChains(self.driver).move_to_element(target).pause(1).click().perform()
-            time.sleep(1)
+            # 关键：必须真实鼠标 hover + click，否则不会展开数量输入和"赠送"按钮
+            self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", target)
+            ActionChains(self.driver).move_to_element(target).pause(1.2).click().perform()
+            time.sleep(1.5)
 
-            inp = self.wait.until(
+            inp = WebDriverWait(self.driver, 10).until(
                 EC.element_to_be_clickable((By.CSS_SELECTOR, cfg.GIFT["input_css"]))
             )
             inp.click()
             inp.clear()
-            inp.send_keys(str(count))
-            time.sleep(1)
+            inp.send_keys(str(n))
+            time.sleep(0.8)
 
-            self.wait.until(
-                EC.element_to_be_clickable((By.CLASS_NAME, cfg.GIFT["send_class"]))
-            ).click()
-            time.sleep(1)
-            try:
-                self.wait.until(
-                    EC.element_to_be_clickable((By.CLASS_NAME, cfg.GIFT["confirm_class"]))
-                ).click()
-            except Exception:
-                pass
+            send_btn = self._find_by_text("赠送")
+            if send_btn is None:
+                for b in self.driver.find_elements(By.CLASS_NAME, cfg.GIFT["send_class"]):
+                    if b.is_displayed():
+                        send_btn = b
+                        break
+            if send_btn is None or not self._click_el(send_btn):
+                return "❌ 找不到赠送按钮"
 
-            time.sleep(8)   # 等结算
-            return f"🚀 送出虎粮 {count} 个"
+            time.sleep(1.5)
+            confirm = self._find_by_text("立即送出")
+            if confirm is None:
+                for b in self.driver.find_elements(By.CLASS_NAME, cfg.GIFT["confirm_class"]):
+                    if b.is_displayed():
+                        confirm = b
+                        break
+            if confirm is not None:
+                self._click_el(confirm)
+
+            time.sleep(6)
+            after = self._wait_balance(timeout=20)
+            if after is None:
+                return "⚠️ 已点击送出，但读不到余额（送前 %s）" % before
+            diff = before - after
+            if diff == n:
+                return "🚀 送出虎粮 %s 个（余额 %s→%s）" % (n, before, after)
+            if diff == 0:
+                return "❌ 送礼未生效（余额 %s→%s）" % (before, after)
+            return "⚠️ 送出数量不符（期望 %s，余额 %s→%s）" % (n, before, after)
         except Exception as e:
             print(f"  [GIFT] 异常: {str(e).splitlines()[0][:120]}")
             return "❌ 送礼流程异常"
