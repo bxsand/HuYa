@@ -251,6 +251,7 @@ class HuYaTask:
         try:
             v = self.driver.execute_script(
                 "var items = document.querySelectorAll('.m-gift-item');"
+                "if (items.length === 0) { return -1; }"
                 "for (var i = 0; i < items.length; i++) {"
                 "  var t = items[i].innerText || '';"
                 "  if (t.indexOf('虎粮') >= 0) {"
@@ -259,7 +260,7 @@ class HuYaTask:
                 "    return s ? parseInt(s, 10) : 0;"
                 "  }"
                 "}"
-                "return -1;"
+                "return 0;"
             )
             return int(v) if v is not None else None
         except Exception:
