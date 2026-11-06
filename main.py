@@ -169,7 +169,11 @@ class HuYaTask:
         try:
             self.driver.get(url)
         except TimeoutException:
-            print("[WARN] 页面加载超时，继续解析")
+            print("[WARN] 页面加载超时，停止加载并继续解析")
+            try:
+                self.driver.execute_script("window.stop();")
+            except Exception:
+                pass
         except WebDriverException as e:
             print(f"[WARN] 导航异常: {str(e).splitlines()[0][:160]}")
         time.sleep(settle)
@@ -221,37 +225,78 @@ class HuYaTask:
 
     # ---------- 虎粮 ----------
     def get_hl_count(self):
+        """查询虎粮数量。>=0 为数量；-1 表示读不到（与"确实是 0"区分开）"""
         print("[COUNT] 查询虎粮数量")
-        self._goto(cfg.URLS["pay_index"], settle=4)
-        try:
-            tab = WebDriverWait(self.driver, 15).until(
-                EC.element_to_be_clickable((By.ID, cfg.PAY_PAGE["pack_tab"]))
-            )
-            tab.click()
+        for attempt in (1, 2):
+            self._goto(cfg.URLS["pay_index"], settle=4)
+            try:
+                tab = WebDriverWait(self.driver, 12).until(
+                    EC.presence_of_element_located((By.ID, cfg.PAY_PAGE["pack_tab"]))
+                )
+            except Exception:
+                print(f"[COUNT] 第 {attempt} 次没找到包裹标签，重试")
+                continue
+            # 用 JS 点击：headless 下 element_to_be_clickable 常误判不可点
+            try:
+                self.driver.execute_script("arguments[0].click();", tab)
+            except Exception as e:
+                print(f"[COUNT] 包裹标签点击异常: {str(e).splitlines()[0][:80]}")
+                continue
             time.sleep(2)
-        except Exception:
-            print("[COUNT] 背包标签点击失败")
-            return 0
-        n = self.driver.execute_script(
-            """
-            var items = document.querySelectorAll('li[data-num]');
-            for (var i = 0; i < items.length; i++) {
-              var t = items[i].title || items[i].innerText || '';
-              if (t.indexOf('虎粮') >= 0) { return items[i].getAttribute('data-num'); }
-            }
-            return 0;
-            """
-        )
-        hl = int(n) if n and str(n).isdigit() else 0
-        print(f"[COUNT] 虎粮: {hl}")
-        return hl
+            n = self.driver.execute_script(
+                """
+                var items = document.querySelectorAll('li[data-num]');
+                for (var i = 0; i < items.length; i++) {
+                  var t = items[i].title || items[i].innerText || '';
+                  if (t.indexOf('虎粮') >= 0) { return items[i].getAttribute('data-num'); }
+                }
+                var shown = document.querySelectorAll('.wrap-list');
+                if (shown.length === 0) { return null; }
+                var more = document.querySelectorAll('.wrap-more .wrap-item');
+                for (var j = 0; j < more.length; j++) {
+                  var s = (more[j].title || '') + (more[j].innerText || '');
+                  if (s.indexOf('虎粮') >= 0) {
+                    var m = (more[j].innerText || '').match(/(\\d+)/);
+                    return m ? m[1] : '0';
+                  }
+                }
+                return '0';
+                """
+            )
+            if n is None:
+                print(f"[COUNT] 第 {attempt} 次包裹面板没渲染，重试")
+                continue
+            hl = int(n) if str(n).isdigit() else 0
+            print(f"[COUNT] 虎粮: {hl}")
+            return hl
+        print("[COUNT] 虎粮数量读取失败（返回未知，稍后兜底）")
+        return -1
+
+    def _probe_hl(self, rid):
+        """兜底：用房间礼物页的虎粮余额判断数量（支付中心读不到时用）"""
+        try:
+            self._goto(cfg.URLS["room_base"].format(rid), settle=cfg.TIMING["room_enter_wait"])
+            lp = self.driver.execute_script('return document.body.getAttribute("data-lp")')
+            gid = self.driver.execute_script('return document.body.getAttribute("data-gid")')
+            if not lp or not gid:
+                print("[COUNT] 房间页未取到 lp/gid，兜底放弃")
+                return -1
+            self._goto(cfg.URLS["gift_tab"].format(lp=lp, gid=gid), settle=cfg.TIMING["page_load_wait"])
+            v = self._wait_balance(timeout=20)
+            return v if v is not None else -1
+        except Exception as e:
+            print(f"[COUNT] 兜底探测失败: {str(e).splitlines()[0][:80]}")
+            return -1
 
     def _read_hl_on_gift_page(self):
         """从礼物页读虎粮余额：.m-gift-item 里的 .c-count；-1 表示页面没有虎粮条目"""
         try:
             v = self.driver.execute_script(
                 "var items = document.querySelectorAll('.m-gift-item');"
-                "if (items.length === 0) { return -1; }"
+                "if (items.length === 0) {"
+                "  /* 已渲染但包裹无条目 = 余额确实 0；未渲染才算读不到 */"
+                "  return document.querySelector('.g-package-list') ? 0 : -1;"
+                "}"
                 "for (var i = 0; i < items.length; i++) {"
                 "  var t = items[i].innerText || '';"
                 "  if (t.indexOf('虎粮') >= 0) {"
@@ -516,7 +561,13 @@ class HuYaTask:
                 return False
 
             total = self.get_hl_count()
-            self.logs.append(f"虎粮: {total}")
+            if total <= 0:
+                # 支付中心读不到（或确实为 0）时，用第一个房间的礼物页余额兜底判断，
+                # 避免"读不到就当 0"导致明明有虎粮却整体跳过送礼
+                print("[COUNT] 改用礼物页余额兜底")
+                total = self._probe_hl(self.rooms[0])
+                print(f"[COUNT] 兜底结果: {total}") if total >= 0 else print("[COUNT] 兜底也失败，本次不送礼")
+            self.logs.append(f"虎粮: {total if total >= 0 else '未知'}")
             if total <= 0:
                 print("[HL] 暂无虎粮，跳过送礼，仅打卡")
 
