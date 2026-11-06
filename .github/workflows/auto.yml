@@ -11,6 +11,12 @@ on:
         required: false
         default: ''
 
+# 防撞车：云函数 dispatch 与残留 schedule 同时触发时排队而非并行
+# （送礼是消耗性操作，两个 run 并行会把同一批虎粮重复送出）
+concurrency:
+  group: send-hl
+  cancel-in-progress: false
+
 jobs:
   send-hl:
     runs-on: ubuntu-latest
