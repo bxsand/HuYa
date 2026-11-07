@@ -81,6 +81,9 @@ WS_HOOK_JS = r"""
 FIND_BTN_JS = r"""
 var fn = function () {
   var nodes = document.querySelectorAll('a, button, span, div');
+  // 关键：外层容器（div.Aside）的 textContent 同样只有"打卡"，必须取最内层的可点击元素，
+  // 否则会点到没有事件处理器的外层 div，表现为"点了没反应、也不发 setFansSign"
+  var best = null, bestScore = -1;
   for (var i = 0; i < nodes.length; i++) {
     var el = nodes[i];
     var t = (el.textContent || '').trim();
@@ -93,13 +96,14 @@ var fn = function () {
     if (!ok) { continue; }
     var r = el.getBoundingClientRect();
     if (r.width <= 0 || r.height <= 0) { continue; }
-    return el;
+    var depth = 0, q = el;
+    while (q.parentElement) { depth++; q = q.parentElement; }
+    var score = depth * 2 + ((el.tagName === 'A' || el.tagName === 'BUTTON') ? 1 : 0);
+    if (score > bestScore) { bestScore = score; best = el; }
   }
-  return null;
+  return best;
 };
-var el = fn();
-if (!el) { return { found: false }; }
-return { found: true, text: (el.textContent || '').trim(), cls: String(el.className || '') };
+return fn();
 """
 
 
@@ -421,9 +425,23 @@ class HuYaTask:
             return "❌ 送礼流程异常"
 
     # ---------- 打卡 ----------
-    def _find_btn(self):
+    def _find_btn_el(self):
+        """返回打卡按钮元素本身（取最内层可点击节点）"""
         try:
-            return self.driver.execute_script(FIND_BTN_JS) or {"found": False}
+            return self.driver.execute_script(FIND_BTN_JS)
+        except Exception:
+            return None
+
+    def _find_btn(self):
+        el = self._find_btn_el()
+        if el is None:
+            return {"found": False}
+        try:
+            return {
+                "found": True,
+                "text": (self.driver.execute_script("return arguments[0].textContent", el) or "").strip(),
+                "cls": str(el.get_attribute("class") or ""),
+            }
         except Exception:
             return {"found": False}
 
@@ -491,29 +509,18 @@ class HuYaTask:
             return CK_DONE, "进入时已是已打卡状态"
 
         before = len(self._ws_frames())
+        btn = self._find_btn_el()
+        if btn is None:
+            return CK_FAIL, "点击前按钮消失"
+        # 真实鼠标点击，且不滚动：浮层靠 hover 维持，滚动会把它收起来
+        # （与 _find_btn_el 取到的是同一个最内层节点，避免点到无事件的外层容器）
         try:
-            self.driver.execute_script(
-                """
-                var nodes = document.querySelectorAll('a, button, span, div');
-                for (var i = 0; i < nodes.length; i++) {
-                  var el = nodes[i], t = (el.textContent || '').trim();
-                  if (t !== '打卡') { continue; }
-                  var p = el.parentElement, ok = false;
-                  for (var j = 0; j < 4 && p; j++) {
-                    if ((p.textContent || '').indexOf('打卡') >= 0) { ok = true; break; }
-                    p = p.parentElement;
-                  }
-                  if (!ok) { continue; }
-                  var r = el.getBoundingClientRect();
-                  if (r.width <= 0 || r.height <= 0) { continue; }
-                  el.click();
-                  return true;
-                }
-                return false;
-                """
-            )
-        except Exception as e:
-            return CK_FAIL, f"点击异常: {str(e).splitlines()[0][:80]}"
+            ActionChains(self.driver).move_to_element(btn).pause(0.3).click().perform()
+        except Exception:
+            try:
+                self.driver.execute_script("arguments[0].click();", btn)
+            except Exception as e:
+                return CK_FAIL, f"点击异常: {str(e).splitlines()[0][:80]}"
 
         # 轮询等待服务端回执后的界面变化
         deadline = time.time() + 12
