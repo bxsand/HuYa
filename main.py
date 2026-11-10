@@ -119,6 +119,7 @@ class HuYaTask:
         self.fatal = ""         # 致命错误（登录失败等）
         self.results = []       # 每个房间的结构化结果
         self.ws_supported = False
+        self.retryable = False  # 是否属于可重试的环境抖动（渲染器卡死）
 
         if not self.cookie:
             print("[FATAL] 未设置 HUYA_COOKIE")
@@ -192,9 +193,7 @@ class HuYaTask:
             return []
 
     # ---------- 登录 ----------
-    def login(self):
-        print("[LOGIN] 注入 Cookie 并校验登录")
-        self._goto(cfg.URLS["user_index"], settle=2)
+    def _apply_cookies(self):
         ok_cnt = 0
         for line in self.cookie.split(";"):
             line = line.strip()
@@ -212,7 +211,30 @@ class HuYaTask:
             except Exception:
                 continue
         print(f"[COOKIE] 已写入 {ok_cnt} 条")
-        self.driver.refresh()
+
+    def _restart_driver(self):
+        """渲染器卡死（timeout: Timed out receiving message from renderer）时只能重建浏览器"""
+        print("[RECOVER] 重建浏览器实例")
+        try:
+            self.driver.quit()
+        except Exception:
+            pass
+        self.driver = self._init_browser()
+        self.wait = WebDriverWait(self.driver, 15)
+
+    def login(self):
+        print("[LOGIN] 注入 Cookie 并校验登录")
+        self._goto(cfg.URLS["user_index"], settle=2)
+        self._apply_cookies()
+        # 刷新放在 try 里：页面半加载时 refresh 会让渲染器卡死 60 秒，直接崩掉整个任务
+        try:
+            self.driver.refresh()
+        except Exception as e:
+            print(f"[WARN] 刷新卡住（渲染器无响应），重建浏览器后重试: {str(e).splitlines()[0][:100]}")
+            self._restart_driver()
+            self._goto(cfg.URLS["user_index"], settle=2)
+            self._apply_cookies()
+            self._goto(cfg.URLS["user_index"], settle=2)
         time.sleep(cfg.TIMING["page_load_wait"])
         try:
             elem = self.wait.until(
@@ -611,9 +633,12 @@ class HuYaTask:
             self.logs.insert(0, head)
 
         except Exception as e:
-            self.fatal = f"程序异常: {e}"
-            print(f"[CRASH] {e}")
+            msg = str(e)
+            print(f"[CRASH] {msg.splitlines()[0][:160]}")
             traceback.print_exc()
+            self.fatal = f"程序异常: {msg.splitlines()[0][:120]}"
+            # 渲染器卡死是环境抖动（非代码问题），交给 main() 重建浏览器整体重跑一次
+            self.retryable = "renderer" in msg.lower() or "Timed out receiving message" in msg
             ok = False
         finally:
             # 推送 + 关浏览器
@@ -632,7 +657,12 @@ class HuYaTask:
 
 def main():
     task = HuYaTask()
-    sys.exit(0 if task.run() else 1)
+    ok = task.run()
+    if not ok and task.retryable:
+        print("[RECOVER] 渲染器无响应（环境抖动），新建浏览器整体重跑一次")
+        task2 = HuYaTask()
+        ok = task2.run()
+    sys.exit(0 if ok else 1)
 
 
 if __name__ == "__main__":
